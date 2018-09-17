@@ -1,9 +1,11 @@
 #include "ros/ros.h"
 //#include "std_msgs/String.h"
 #include <std_msgs/UInt8.h>
+#include <std_msgs/Int16.h>
 #include <wiringPi.h>
 #include <softPwm.h>
-
+#include <time.h>
+#include <sys/time.h>
 /**
  * This tutorial demonstrates simple receipt of messages over the ROS system.
  */
@@ -14,49 +16,70 @@
 #define L_DIRECTION2_PIN 25
 #define R_SPEED_PIN 27
 #define L_SPEED_PIN 28
-
-
+#define BASE_SPEED 100//100
+int preError = 0;
+int accError = 0;
 void vdirectionL(bool direction);
 void vdirectionR(bool direction);
 void move(bool directL, bool directR, int speedL, int speedR);
-
-void chatterCallback(const std_msgs::UInt8::ConstPtr& msg)
+struct timeval stop1, start1;
+int tooggle = 0;
+void chatterCallback(const std_msgs::Int16::ConstPtr& msg)
 {
   //ROS_INFO("I heard: [%d]", msg->data);
-  bool directL = 0;
-  bool directR = 0;
+  bool directL = FALSE;
+  bool directR = TRUE;
   int speedR = 0;
   int speedL = 0;
-  if (msg->data == 48)//backward
+  int delay = 0;
+  /*struct timeval stop, start;
+  gettimeofday(&stop, NULL);
+  printf("%lu", msg->data);
+  printf("interval took %lu\n", stop.tv_usec - msg->data*100);
+  /*if (tooggle == 0){
+	gettimeofday(&start1, NULL);
+        tooggle = 1;
+  }
+  else{
+	tooggle = 0;
+	gettimeofday(&stop1, NULL);
+	printf("interval took %lu\n", stop1.tv_usec - start1.tv_usec);
+  }*/
+  //unsigned int tim = millis();
+  /*if (msg->data == 48)//backward
   {
     directL = TRUE;
     directR = FALSE;
-    speedR = 100;
-    speedL = 100;
+    speedR = 60;
+    speedL = 60;
+    delay = 1000000;
     ROS_INFO("I heard: [%d]", msg->data);
   }
   else if(msg->data == 49)//forward
   {
     directR = TRUE;
     directL = FALSE;
-    speedR = 100;
-    speedL = 100;
+    speedR = 60;
+    speedL = 60;
+    delay = 1000000;
     ROS_INFO("I heard: [%d]", msg->data);
   }
-  else if(msg->data == 50)//left
+  else if(msg->data == 50)//right
   {
     directR = TRUE;
     directL = TRUE;
-    speedR = 100;
-    speedL = 100;
+    speedR = 60;
+    speedL = 60;
+    delay = 500000;
     ROS_INFO("I heard: [%d]", msg->data);
   }
-  else if(msg->data == 51)//right
+  else if(msg->data == 51)//left
   {
     directR = FALSE;
     directL = FALSE;
-    speedR = 100;
-    speedL = 100;
+    speedR = 60;
+    speedL = 60;
+    delay = 500000;
     ROS_INFO("I heard: [%d]", msg->data);
   }
   else if(msg->data == 52)//stop
@@ -66,9 +89,39 @@ void chatterCallback(const std_msgs::UInt8::ConstPtr& msg)
     speedR = 0;
     speedL = 0;
     ROS_INFO("I heard: [%d]", msg->data);
+  }*/
+  double k = 1;
+  double kd = 1;
+  double ki = 0.0;
+  if (msg->data != 1000){
+    std::cout<< msg->data <<std::endl;
+    
+    speedL = BASE_SPEED - 1.2*(k*msg->data + ki*accError + kd*(msg->data - preError));
+    speedR = BASE_SPEED + (k*msg->data + ki*accError + kd*(msg->data - preError));
+    preError = msg->data;
+    accError += msg->data;
+
+    if (speedL > 255)
+	speedL = 255;
+    if (speedL < 0 )
+	speedL = 0;
+    if (speedR > 255)
+        speedR = 255;
+    if (speedR < 0 )
+        speedR = 0;
+  }
+  else{
+    speedL = 0;
+    speedR = 0;
   }
 
+  //std::cout<<speedL<<speedR<<std::endl;
   move(directL, directR, speedL, speedR);
+  //usleep(delay);
+  //move(directL, directR, 0, 0);
+  //gettimeofday(&stop, NULL);
+  //printf("took %lu\n", stop.tv_usec - start.tv_usec);
+  //std::cout<<"time: "<< millis() - tim<<std::endl;
 }
 
 void vdirectionL(bool direction)
@@ -85,8 +138,8 @@ void vdirectionR(bool direction)
 
 void move(bool directL, bool directR, int speedL, int speedR)
 {
-  vdirectionL(directL);
-  vdirectionR(directR);
+  //vdirectionL(directL);
+  //vdirectionR(directR);
   softPwmWrite (L_SPEED_PIN, speedL);
   softPwmWrite (R_SPEED_PIN, speedR);
 }
@@ -108,8 +161,10 @@ int main(int argc, char **argv)
   pinMode (L_DIRECTION1_PIN, OUTPUT);
   pinMode (R_DIRECTION2_PIN, OUTPUT);
   pinMode (L_DIRECTION2_PIN, OUTPUT);
-  softPwmCreate (R_SPEED_PIN, 0, 100);
-  softPwmCreate (L_SPEED_PIN, 0, 100);
+  vdirectionL(FALSE);
+  vdirectionR(TRUE);
+  softPwmCreate (R_SPEED_PIN, 0, 255);
+  softPwmCreate (L_SPEED_PIN, 0, 255);
   ros::init(argc, argv, "robotlistener");
 
   /**
@@ -134,7 +189,7 @@ int main(int argc, char **argv)
    * is the number of messages that will be buffered up before beginning to throw
    * away the oldest ones.
    */
-  ros::Subscriber sub = n.subscribe("robotchatter", 1000, chatterCallback);
+  ros::Subscriber sub = n.subscribe("robotchatter", 20, chatterCallback, ros::TransportHints().tcpNoDelay());
 
   /**
    * ros::spin() will enter a loop, pumping callbacks.  With this version, all
